@@ -21,7 +21,7 @@ To install from crates.io to $HOME/bin/, run, for example:
 
 To install from GitHub to $HOME/bin/, for example the latest commit, run:
 
-    $ cargo install --root $HOME/ btrfs-usage-monitor --git https://github.com/willemw12/btrfs-usage-monitor
+    $ cargo install --root $HOME/ --git https://github.com/willemw12/btrfs-usage-monitor
 
 or
 
