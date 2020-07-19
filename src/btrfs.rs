@@ -2,18 +2,18 @@ use anyhow::{bail, ensure, Context, Result};
 use regex::Regex;
 use std::process::{Command, Stdio};
 
-/// Human readable data usage (e.g., 1K 234M 2G).
-#[derive(Clone, Debug)]
-struct UsageHuman {
-    free: String,
-    free_min: String,
-}
-
-/// Raw data usage in bytes.
+/// Raw Btrfs data usage in bytes.
 #[derive(Debug)]
 struct UsageRaw {
     device_size: u64,
     free: u64,
+}
+
+/// Human readable Btrfs data usage (e.g., 1K 234M 2G).
+#[derive(Clone, Debug)]
+struct UsageHuman {
+    free: String,
+    free_min: String,
 }
 
 /// Returns a warning if Btrfs data usage drops below the free limit percentage.
@@ -114,10 +114,7 @@ fn extract_usage_raw(buf: &str) -> Result<UsageRaw> {
         bail!("usage data parse error");
     }
 
-    Ok(UsageRaw {
-        device_size: device_size,
-        free: free,
-    })
+    Ok(UsageRaw { device_size, free })
 }
 
 fn extract_usage_human(buf: &str) -> Result<UsageHuman> {
