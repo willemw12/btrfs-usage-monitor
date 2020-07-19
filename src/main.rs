@@ -27,7 +27,7 @@ fn main() {
         Ok(opts) => opts,
         Err(err) => {
             eprintln!("{}", err);
-            return;
+            process::exit(2);
         }
     };
     if let Err(err) = run(&opts.path, opts.free_limit_percentage) {
