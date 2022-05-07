@@ -1,10 +1,10 @@
 [package]
 name = "btrfs-usage-monitor"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["willemw12 <willemw12@gmail.com>"]
-edition = "2018"
+edition = "2021"
 license = "GPL-3.0-or-later"
-description = "A simple BTRFS usage monitor"
+description = "A simple Btrfs disk space usage monitor"
 homepage = "https://github.com/willemw12/btrfs-usage-monitor"
 repository = "https://github.com/willemw12/btrfs-usage-monitor"
 readme = "README.md"
@@ -13,12 +13,11 @@ categories = ["command-line-utilities"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies.clap]
-#version = "3"
-version = "3.0.0-beta.1"
-default-features = false
-features = [ "derive", "std" ]
-
 [dependencies]
-anyhow = "1"
-regex = "1"
+anyhow = "1.0.56"
+regex = "1.5.5"
+
+[dependencies.clap]
+version = "3.1.6"
+default-features = false
+features = [ "cargo", "derive", "std" ]

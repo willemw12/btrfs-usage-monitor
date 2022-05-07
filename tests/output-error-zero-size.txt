@@ -1,0 +1,1 @@
+ERROR: /mnt/btrfs: device size is 0

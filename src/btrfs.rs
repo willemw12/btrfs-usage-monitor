@@ -1,76 +1,114 @@
 use anyhow::{bail, ensure, Context, Result};
 use regex::Regex;
+use std::cmp;
 use std::process::{Command, Stdio};
 
-/// Raw Btrfs data usage in bytes.
+use super::config::Config;
+
+/// Raw Btrfs filesystem data usage in bytes.
 #[derive(Debug)]
 struct UsageRaw {
     device_size: u64,
     free: u64,
 }
 
-/// Human readable Btrfs data usage (e.g., 1K 234M 2G).
+/// Human readable Btrfs filesystem data usage (e.g., 1K 234M 2G).
 #[derive(Clone, Debug)]
 struct UsageHuman {
     free: String,
     free_min: String,
 }
 
-/// Returns a warning if Btrfs data usage drops below the free limit percentage.
-pub fn btrfs_usage(path: &str, free_limit_percentage: u64) -> Result<Option<String>> {
-    let usage_raw = usage_raw(path)?;
-    let usage_human = usage_human(path)?;
-    usage_warning(path, free_limit_percentage, &usage_raw, &usage_human)
+/// Returns a warning if Btrfs filesystem data usage drops below the free limit percentage.
+/// Path is the Btrfs filesystem location.
+pub fn btrfs_usage(
+    config: &Config,
+    path: &str,
+    free_limit_percentage: u8,
+) -> Result<Option<String>> {
+    Ok(usage_warning(
+        path,
+        free_limit_percentage,
+        &usage_raw(config, path)?,
+        &usage_human(config, path)?,
+    ))
 }
 
 //
 
-fn usage_raw(path: &str) -> Result<UsageRaw> {
-    let output = Command::new("btrfs")
-        .arg("filesystem")
-        .arg("usage")
-        .arg("--raw")
-        .arg(path)
+fn usage_raw(config: &Config, path: &str) -> Result<UsageRaw> {
+    let cmd = "btrfs";
+    let args = vec!["filesystem", "usage", "--raw", path];
+    let output = Command::new(cmd)
+        .args(&args)
         .stderr(Stdio::inherit())
         .output()
-        .context("failed to execute btrfs")?;
+        .context(format!("'{} {}'", cmd, args.join(" ")))?;
     // if !output.status.success() {
-    //     // return Err(anyhow!("btrfs: {}", output.status));
-    //     bail!("btrfs: {}", output.status);
+    //     // return Err(anyhow!("'{} {}': {}", cmd, args.join(" "),output.status));
+    //     bail!("'{} {}': {}", cmd, args.join(" "),output.status);
     // }
-    ensure!(output.status.success(), "btrfs: {}", output.status);
+    ensure!(
+        output.status.success(),
+        "'{} {}': {}",
+        cmd,
+        args.join(" "),
+        output.status
+    );
 
-    let buf = String::from_utf8(output.stdout).context("usage data parse error")?;
+    // let buf = String::from_utf8(output.stdout).context("parse error in filesystem data usage")?;
+    let buf = String::from_utf8_lossy(&output.stdout);
+    if config.debug {
+        eprint!("DEBUG: '{} {}':\n{}", cmd, args.join(" "), buf);
+    }
+
     extract_usage_raw(&buf)
 }
 
-fn usage_human(path: &str) -> Result<UsageHuman> {
-    let output = Command::new("btrfs")
-        .arg("filesystem")
-        .arg("usage")
-        .arg(path)
+fn usage_human(config: &Config, path: &str) -> Result<UsageHuman> {
+    let cmd = "btrfs";
+    let args = vec!["filesystem", "usage", path];
+    let output = Command::new(cmd)
+        .args(&args)
         .stderr(Stdio::inherit())
         .output()
-        .context("failed to execute btrfs")?;
-    ensure!(output.status.success(), "btrfs: {}", output.status);
+        .context(format!("'{} {}'", cmd, args.join(" ")))?;
+    ensure!(
+        output.status.success(),
+        "'{} {}': {}",
+        cmd,
+        args.join(" "),
+        output.status
+    );
 
-    let buf = String::from_utf8(output.stdout).context("usage data parse error")?;
+    let buf = String::from_utf8_lossy(&output.stdout);
+    if config.debug {
+        eprint!("DEBUG: '{} {}':\n{}", cmd, args.join(" "), buf);
+    }
+
     extract_usage_human(&buf)
 }
 
 fn usage_warning(
     path: &str,
-    free_limit_percentage: u64,
+    free_limit_percentage: u8,
     usage_raw: &UsageRaw,
     usage_human: &UsageHuman,
-) -> Result<Option<String>> {
-    let free_percentage = (usage_raw.free * 100) / usage_raw.device_size;
+) -> Option<String> {
+    // // ensure!(usage_raw.device_size > 0, "btrfs: device size is 0");
+    if usage_raw.device_size == 0 {
+        return Some(format!("ERROR: {}: device size is 0", path));
+    }
 
-    Ok(if free_percentage < free_limit_percentage {
+    let free_limit_percentage = free_limit_percentage.clamp(0, 100);
+
+    let free_percentage = cmp::min((usage_raw.free * 100) / usage_raw.device_size, 100) as u8;
+
+    if free_percentage < free_limit_percentage {
         Some(
-            // format!("WARNING {}: {} (min: {})", path, usage_human.free, usage_human.free_min),
+            // format!("WARNING: {}, free: {} (min: {})", path, usage_human.free, usage_human.free_min),
             format!(
-                "WARNING {} free: {} (min: {}), {}% (limit: {}%)",
+                "WARNING: {}, free: {} (min: {}), {}% (limit: {}%)",
                 path,
                 usage_human.free,
                 usage_human.free_min,
@@ -80,7 +118,7 @@ fn usage_warning(
         )
     } else {
         None
-    })
+    }
 }
 
 //
@@ -94,8 +132,9 @@ fn extract_usage_raw(buf: &str) -> Result<UsageRaw> {
         .map(|cap| cap[1].trim().parse().unwrap_or_default())
         .collect::<Vec<u64>>();
     let device_size = match result.first() {
+        // Some(0) => bail!("btrfs: device size is 0"),
         Some(u) => *u,
-        None => bail!("usage data parse error: Device size in raw bytes"),
+        None => bail!("parse error in filesystem data usage: at 'Device size' in raw bytes"),
     };
 
     let pattern = Regex::new(r"Free \(estimated\):(.*)\(")?;
@@ -107,12 +146,8 @@ fn extract_usage_raw(buf: &str) -> Result<UsageRaw> {
         .collect::<Vec<u64>>();
     let free = match result.first() {
         Some(u) => *u,
-        None => bail!("usage data parse error: Free (estimated) in raw bytes"),
+        None => bail!("parse error in filesystem data usage: at 'Free (estimated)' in raw bytes"),
     };
-
-    if device_size == 0 {
-        bail!("usage data parse error");
-    }
 
     Ok(UsageRaw { device_size, free })
 }
@@ -125,14 +160,14 @@ fn extract_usage_human(buf: &str) -> Result<UsageHuman> {
         .filter_map(|line| pattern.captures(line))
         .filter(|cap| cap.len() > 2)
         .map(|cap| UsageHuman {
-            free: cap[1].trim().to_string(),
-            free_min: cap[2].trim().to_string(),
+            free: String::from(cap[1].trim()),
+            free_min: String::from(cap[2].trim()),
         })
         .collect::<Vec<_>>();
 
     match result.first() {
-        Some(u) => Ok(u.clone()),
-        None => bail!("usage data parse error: Free (estimated)"),
+        Some(u) => Ok(u.to_owned()),
+        None => bail!("parse error in filesystem data usage: at 'Free (estimated)'"),
     }
 }
 
@@ -144,28 +179,92 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_btrfs_usage1() {
-        // Get input
-        const PATH: &str = "/mnt/btrfs";
-        const FREE_LIMIT_PERCENTAGE: u64 = 60;
-        let buf_raw = fs::read_to_string("tests/input-usage-raw1.txt").expect("ERROR");
-        let buf_human = fs::read_to_string("tests/input-usage-human1.txt").expect("ERROR");
+    const PATH: &str = "/mnt/btrfs";
 
-        // Run test
-        let usage_raw = extract_usage_raw(&buf_raw);
-        let usage_human = extract_usage_human(&buf_human);
-        let warning = usage_warning(
-            PATH,
-            FREE_LIMIT_PERCENTAGE,
-            &usage_raw.unwrap(),
-            &usage_human.unwrap(),
-        );
+    #[derive(Default)]
+    struct TestData {
+        path: &'static str,
+        input_file_raw: &'static str,
+        input_file_human: &'static str,
+        free_limit_percentage: u8,
 
-        // Check result
-        let expected = fs::read_to_string("tests/output-warning1.txt").expect("ERROR");
-        // NOTE fs::read_to_string() adds a newline character at the end of the string
-        let expected = expected.trim_end();
-        assert_eq!(warning.unwrap().unwrap(), expected);
+        expected_file: &'static str,
     }
+
+    macro_rules! test_set {
+        ($name:ident, $data:expr) => {
+            #[test]
+            fn $name() {
+                let data = $data;
+
+                // Get input
+                let buf_raw = fs::read_to_string(data.input_file_raw).expect("ERROR");
+                let buf_human = fs::read_to_string(data.input_file_human).expect("ERROR");
+
+                // Run test
+                let usage_raw = extract_usage_raw(&buf_raw).expect("ERROR");
+                let usage_human = extract_usage_human(&buf_human).expect("ERROR");
+                let warning = usage_warning(
+                    data.path,
+                    data.free_limit_percentage,
+                    &usage_raw,
+                    &usage_human,
+                );
+
+                // Check result
+                let expected = fs::read_to_string(data.expected_file).expect("ERROR");
+                // NOTE fs::read_to_string() adds a newline character at the end of the string
+                let expected = expected.trim_end();
+                assert_eq!(warning.unwrap(), expected);
+            }
+        };
+    }
+
+    test_set!(
+        test_btrfs_zero_size,
+        TestData {
+            path: PATH,
+            input_file_raw: "tests/input-usage-raw-zero-size.txt",
+            input_file_human: "tests/input-usage-human-zero-size.txt",
+            expected_file: "tests/output-error-zero-size.txt",
+            ..Default::default()
+        }
+    );
+
+    test_set!(
+        test_btrfs_usage1,
+        TestData {
+            path: PATH,
+            input_file_raw: "tests/input-usage-raw1.txt",
+            input_file_human: "tests/input-usage-human1.txt",
+            free_limit_percentage: 60,
+            expected_file: "tests/output-warning1.txt",
+        }
+    );
+
+    //
+
+    // macro_rules! test_set_fail {
+    //     ($name:ident, $data:expr) => {
+    //         #[test]
+    //         #[should_panic]
+    //         fn $name() {
+    //             let data = $data;
+    //
+    //             // Get input
+    //             let buf_raw = fs::read_to_string(data.input_file_raw).expect("ERROR");
+    //
+    //             // Run test
+    //             extract_usage_raw(&buf_raw).unwrap();
+    //         }
+    //     };
+    // }
+    //
+    // test_set_fail!(
+    //     test_btrfs_zero_size,
+    //     TestData {
+    //         input_file_raw: "tests/input-usage-raw-zero-size.txt",
+    //         ..Default::default()
+    //     }
+    // );
 }

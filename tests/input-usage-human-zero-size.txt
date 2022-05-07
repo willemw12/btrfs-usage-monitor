@@ -1,0 +1,17 @@
+Overall:
+    Device size:		 0.00B
+    Device allocated:		 146.56GiB
+    Device unallocated:		 198.63GiB
+    Device missing:		 345.19GiB
+    Used:			 142.65GiB
+    Free (estimated):		 199.61GiB	(min: 100.29GiB)
+    Data ratio:			      1.00
+    Metadata ratio:		      2.00
+    Global reserve:		 512.00MiB	(used: 0.00B)
+
+Data,single: Size:141.00GiB, Used:140.02GiB
+
+Metadata,DUP: Size:2.75GiB, Used:1.31GiB
+
+System,DUP: Size:32.00MiB, Used:16.00KiB
+
